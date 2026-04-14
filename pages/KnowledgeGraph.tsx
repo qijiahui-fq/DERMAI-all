@@ -109,9 +109,10 @@ const KnowledgeGraph: React.FC = () => {
       });
       const topTargets = otRes.data.data?.disease?.associatedTargets?.rows || [];
 
-      const drugPromises = topTargets.map((t: any) => 
-        axios.get(`https://www.ebi.ac.uk/chembl/api/data/drug?target_components__target_component_synonyms__component_synonym__icontains=${t.target.approvedSymbol}&format=json`)
-      );
+     const drugPromises = topTargets.map((t: any) => 
+  // 改为请求我们自己的后端接口
+  axios.get(`/api/chembl/drug?target_components__target_component_synonyms__component_synonym__icontains=${t.target.approvedSymbol}&format=json`)
+);
       const litPromises = topTargets.map((t: any) => 
         axios.post(OPENTARGETS_API_URL, { 
           query: `query { disease(efoId: "${matched!.efo}") { evidences(datasourceIds: ["europepmc"], ensemblIds: ["${t.target.id}"], size: 3) { rows { literature textMiningSentences { text } } } } }` 
