@@ -2,7 +2,7 @@ name: Sync to Hugging Face hub
 on:
   push:
     branches: [main]
-  workflow_dispatch: # 增加这个按钮，让你能手动点一下同步
+  workflow_dispatch: # 手动触发按钮
 
 jobs:
   sync-to-hub:
@@ -11,9 +11,29 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
-          lfs: true
+
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
+          # 1. 配置临时 Git 身份
+          git config --global user.email "sync@example.com"
+          git config --global user.name "HuggingFace Sync"
+          
+          # 2. 创建一个临时纯净文件夹
+          mkdir temp_sync
+          
+          # 3. 只拷贝你真正需要的文件到临时文件夹
+          # 如果你的 dist 是个文件夹，cp -r 会完整拷贝它
+          cp -r dist server.py Dockerfile requirements.txt temp_sync/ || true
+          
+          # 4. 进入临时文件夹，把它变成一个全新的、超轻量的小仓库
+          cd temp_sync
+          git init
+          git checkout -b main
+          git add .
+          git commit -m "Pure deployment without bloated files"
+          
+          # 5. 暴力推送到 Hugging Face
+          # 注意：这里会直接覆盖 HF 上的旧内容，确保 HF 变得干干净净
           git push --force https://anything:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/NeednottoKnow123/dermai-platform main
