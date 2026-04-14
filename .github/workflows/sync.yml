@@ -1,39 +1,33 @@
-name: Sync to Hugging Face hub
-on:
-  push:
-    branches: [main]
-  workflow_dispatch: # 手动触发按钮
+---
+title: DermAI
+emoji: 🧪
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
 
-jobs:
-  sync-to-hub:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+</div>
 
-      - name: Push to hub
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          # 1. 配置临时 Git 身份
-          git config --global user.email "sync@example.com"
-          git config --global user.name "HuggingFace Sync"
-          
-          # 2. 创建一个临时纯净文件夹
-          mkdir temp_sync
-          
-          # 3. 只拷贝你真正需要的文件到临时文件夹
-          # 如果你的 dist 是个文件夹，cp -r 会完整拷贝它
-          cp -r dist server.py Dockerfile requirements.txt temp_sync/ || true
-          
-          # 4. 进入临时文件夹，把它变成一个全新的、超轻量的小仓库
-          cd temp_sync
-          git init
-          git checkout -b main
-          git add .
-          git commit -m "Pure deployment without bloated files"
-          
-          # 5. 暴力推送到 Hugging Face
-          # 注意：这里会直接覆盖 HF 上的旧内容，确保 HF 变得干干净净
-          git push --force https://anything:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/NeednottoKnow123/dermai-platform main
+# DermAI - 皮肤药研平台 
+DermAI 是一个专为皮肤科转化医学与新药研发设计的工业级智能辅助平台。本项目深度整合了 Open Targets、ChEMBL 和 Europe PMC 全球多组学与药理数据库。
+
+![System Status](https://img.shields.io/badge/System-Active-success)
+![React](https://img.shields.io/badge/React-18.x-blue)
+![Python](https://img.shields.io/badge/Python-Backend-yellow)
+
+## 🚀 部署说明
+本项目通过 GitHub Actions 自动同步至 Hugging Face Spaces。
+
+### 核心功能
+* **智能数据大屏 (Dashboard)**
+* **AI 靶点识别引擎 (Target ID)**
+* **多维皮肤知识图谱 (Knowledge Graph)**
+
+### 目录结构
+* `dist/`: 前端静态资源
+* `server.py`: 后端服务入口
+* `Dockerfile`: 容器配置
