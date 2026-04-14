@@ -6,22 +6,30 @@ import os
 import time
 import re
 
-# 优先级：Hugging Face 动态分配端口 -> 7860
+# 1. 动态获取端口：Hugging Face 必须读取 PORT 环境变量，默认 7860
 PORT = int(os.environ.get('PORT', 7860))
 
-# 指定前端编译产物目录为 dist
-app = Flask(__name__, static_folder='dist', static_url_path='')
+# 2. 初始化 Flask：明确静态文件路径，防止路由冲突
+# static_url_path='/' 确保前端资源能被正确访问
+app = Flask(__name__, static_folder='dist', static_url_path='/')
 
-# 允许跨域
+# 3. 强力跨域配置：允许所有来源，解决线上可能的拦截问题
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# 配置
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
+
+# 配置信息
 OPENTARGETS_GRAPHQL_URL = "https://api.platform.opentargets.org/api/v4/graphql"
 COZE_API_URL_CHAT = "https://api.coze.cn/v3/chat"
 COZE_TOKEN = "pat_M169XpSGkBLlrL5AdPaQpEx1lrknpK7DhizMAbNCMtJq4cMjmA3jqyELpSpXdBA0"
 COZE_BOT_ID = "7627011465744318479"
 
-# --- 静态文件托管（非常重要） ---
+# --- 静态文件托管（单页应用必备） ---
 
 @app.route('/')
 def index():
@@ -29,7 +37,7 @@ def index():
 
 @app.errorhandler(404)
 def not_found(e):
-    # 处理前端单页应用路由：404时全部返回 index.html
+    # 当找不到路径时（比如刷新了前端路由），统一返回 index.html 让前端接管
     return send_from_directory(app.static_folder, 'index.html')
 
 # --- 业务 API 路由 ---
@@ -40,9 +48,11 @@ def opentargets_proxy():
         return jsonify({"status": "ok"}), 200
     try:
         data = request.get_json()
+        # 增加超时控制，防止请求堆积
         response = requests.post(OPENTARGETS_GRAPHQL_URL, json=data, headers={"Content-Type": "application/json"}, timeout=60)
         return jsonify(response.json()), response.status_code
     except Exception as e:
+        print(f"❌ OpenTargets Proxy Error: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/academic-insights', methods=['POST'])
@@ -73,7 +83,7 @@ def get_academic_insights():
 
         chat_id, conv_id = create_data["data"]["id"], create_data["data"]["conversation_id"]
         
-        # 轮询
+        # 轮询获取结果
         for _ in range(90):
             time.sleep(2)
             poll = requests.get(f"https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conv_id}", headers=headers).json()
@@ -99,15 +109,19 @@ def get_academic_insights():
             except: pass
         return jsonify({"code": 200, "data": ai_results})
     except Exception as e:
+        print(f"❌ Academic Insights Error: {str(e)}")
         return jsonify({"code": 500, "message": str(e)}), 500
 
 @app.route('/api/score-target', methods=['POST'])
 def score_target():
     data = request.get_json()
-    score = min(10, max(1, data.get('open_targets_score', 0.5) * 10))
+    # 模拟简单的打分计算逻辑
+    raw_score = data.get('open_targets_score', 0.5)
+    score = min(10, max(1, raw_score * 10))
     return jsonify({'code': 200, 'data': {'score': score}})
 
+# --- 启动 ---
 if __name__ == '__main__':
-    print(f"🚀 DermAI Platform Starting on Port {PORT}")
-    # 注意：在 Docker/HuggingFace 中必须监听 0.0.0.0
+    print(f"🚀 DermAI Platform Starting on Port {PORT}...")
+    # 在 Docker/Space 环境中必须 host='0.0.0.0'
     app.run(host='0.0.0.0', port=PORT)
