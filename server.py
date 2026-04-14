@@ -9,11 +9,10 @@ import re
 # 1. 动态获取端口：Hugging Face 必须读取 PORT 环境变量，默认 7860
 PORT = int(os.environ.get('PORT', 7860))
 
-# 2. 初始化 Flask：明确静态文件路径，防止路由冲突
-# static_url_path='/' 确保前端资源能被正确访问
+# 2. 初始化 Flask：明确静态文件路径
 app = Flask(__name__, static_folder='dist', static_url_path='/')
 
-# 3. 强力跨域配置：允许所有来源，解决线上可能的拦截问题
+# 3. 强力跨域配置
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 @app.after_request
@@ -25,11 +24,12 @@ def after_request(response):
 
 # 配置信息
 OPENTARGETS_GRAPHQL_URL = "https://api.platform.opentargets.org/api/v4/graphql"
+CHEMBL_DRUG_URL = "https://www.ebi.ac.uk/chembl/api/data/drug"
 COZE_API_URL_CHAT = "https://api.coze.cn/v3/chat"
 COZE_TOKEN = "pat_M169XpSGkBLlrL5AdPaQpEx1lrknpK7DhizMAbNCMtJq4cMjmA3jqyELpSpXdBA0"
 COZE_BOT_ID = "7627011465744318479"
 
-# --- 静态文件托管（单页应用必备） ---
+# --- 静态文件托管 ---
 
 @app.route('/')
 def index():
@@ -37,24 +37,35 @@ def index():
 
 @app.errorhandler(404)
 def not_found(e):
-    # 当找不到路径时（比如刷新了前端路由），统一返回 index.html 让前端接管
     return send_from_directory(app.static_folder, 'index.html')
 
 # --- 业务 API 路由 ---
 
+# 1. OpenTargets 中转
 @app.route('/api/opentargets/graphql', methods=['POST', 'OPTIONS'], strict_slashes=False)
 def opentargets_proxy():
     if request.method == 'OPTIONS':
         return jsonify({"status": "ok"}), 200
     try:
         data = request.get_json()
-        # 增加超时控制，防止请求堆积
         response = requests.post(OPENTARGETS_GRAPHQL_URL, json=data, headers={"Content-Type": "application/json"}, timeout=60)
         return jsonify(response.json()), response.status_code
     except Exception as e:
-        print(f"❌ OpenTargets Proxy Error: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+# 2. ChEMBL 药物数据中转 (解决知识图谱 CORS 报错)
+@app.route('/api/chembl/drug', methods=['GET'])
+def chembl_proxy():
+    try:
+        # 将前端传来的所有参数原封不动转发给 ChEMBL
+        params = request.args
+        response = requests.get(CHEMBL_DRUG_URL, params=params, timeout=30)
+        return jsonify(response.json()), response.status_code
+    except Exception as e:
+        print(f"❌ ChEMBL Proxy Error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+# 3. Coze 学术洞察 API
 @app.route('/api/academic-insights', methods=['POST'])
 def get_academic_insights():
     try:
@@ -64,10 +75,7 @@ def get_academic_insights():
         
         instructions = (
             f"任务：检索关于【{disease_name}】的2024-2026年最新前沿文献，提取核心靶点。\n"
-            f"要求：\n"
-            f"1. 调用 PubMed 检索，禁止单次超过5篇。\n"
-            f"2. 提取 targets 必须是英文大写缩写（如 IL-17A）。\n"
-            f"3. 输出纯 JSON 数组：[{{\"title\": \"标题\", \"pub_date\": \"年份\", \"targets\": [\"靶点\"], \"mechanism\": \"机制\", \"pmid\": \"ID\"}}]"
+            f"要求：1. 调用 PubMed 检索；2. 提取 targets 必须是大写英文；3. 输出纯 JSON 数组。"
         )
 
         payload = {
@@ -83,8 +91,7 @@ def get_academic_insights():
 
         chat_id, conv_id = create_data["data"]["id"], create_data["data"]["conversation_id"]
         
-        # 轮询获取结果
-        for _ in range(90):
+        for _ in range(60): # 轮询
             time.sleep(2)
             poll = requests.get(f"https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conv_id}", headers=headers).json()
             if poll.get("data", {}).get("status") == "completed": break
@@ -103,25 +110,21 @@ def get_academic_insights():
                         "targets": [str(t).upper().strip() for t in target_list if t],
                         "pub_date": str(item.get('pub_date', '2024-2026')),
                         "mechanism": item.get('mechanism', '解析中...'),
-                        "mention_count": str(item.get('mention_count', '近期高频')),
                         "url": f"https://pubmed.ncbi.nlm.nih.gov/{item.get('pmid', '')}/" if item.get('pmid') else "#"
                     })
             except: pass
         return jsonify({"code": 200, "data": ai_results})
     except Exception as e:
-        print(f"❌ Academic Insights Error: {str(e)}")
         return jsonify({"code": 500, "message": str(e)}), 500
 
+# 4. 靶点打分接口
 @app.route('/api/score-target', methods=['POST'])
 def score_target():
     data = request.get_json()
-    # 模拟简单的打分计算逻辑
     raw_score = data.get('open_targets_score', 0.5)
     score = min(10, max(1, raw_score * 10))
     return jsonify({'code': 200, 'data': {'score': score}})
 
-# --- 启动 ---
 if __name__ == '__main__':
     print(f"🚀 DermAI Platform Starting on Port {PORT}...")
-    # 在 Docker/Space 环境中必须 host='0.0.0.0'
     app.run(host='0.0.0.0', port=PORT)
