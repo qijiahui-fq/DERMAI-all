@@ -16,4 +16,4 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git push --force https://NeednottoKnow123:$HF_TOKEN@huggingface.co/spaces/NeednottoKnow123/dermai-platform main
+          git push --force https://anything:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/NeednottoKnow123/dermai-platform main
