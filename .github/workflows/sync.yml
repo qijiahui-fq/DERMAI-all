@@ -1,0 +1,19 @@
+name: Sync to Hugging Face hub
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # 增加这个按钮，让你能手动点一下同步
+
+jobs:
+  sync-to-hub:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          lfs: true
+      - name: Push to hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git push --force https://NeednottoKnow123:$HF_TOKEN@huggingface.co/spaces/NeednottoKnow123/dermai-platform main
