@@ -73,18 +73,17 @@ def get_academic_insights():
         disease_name = data.get('disease', '银屑病')
         headers = {"Authorization": f"Bearer {COZE_TOKEN}", "Content-Type": "application/json"}
         
-        instructions = (
-            f"任务：检索关于【{disease_name}】的2024-2026年最新前沿文献，提取核心靶点。\n"
-            f"要求：1. 调用 PubMed 检索；2. 提取 targets 必须是大写英文；3. 输出纯 JSON 数组。"
-        )
+        # ⚠️ 修改点 1：不要再写长篇大论的指令去干扰智能体的人设
+        # 只发送最核心的触发词，让智能体执行它在 Coze 网页端已经发布好的“双通道”逻辑
+        user_message = f"请检索关于【{disease_name}】的最新前沿与经典文献，并按照要求的 JSON 格式输出。"
 
         payload = {
             "bot_id": COZE_BOT_ID,
             "user_id": "DermAI_Researcher",
             "stream": False,
-            "additional_messages": [{"role": "user", "content": instructions, "content_type": "text"}]
+            "additional_messages": [{"role": "user", "content": user_message, "content_type": "text"}]
         }
-
+        
         create_resp = requests.post(COZE_API_URL_CHAT, headers=headers, json=payload, timeout=30)
         create_data = create_resp.json()
         if create_data.get("code") != 0: return jsonify({"code": 200, "data": []})
@@ -99,23 +98,33 @@ def get_academic_insights():
         msg_resp = requests.get(f"https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conv_id}", headers=headers).json()
         content = "".join([m.get("content", "") for m in msg_resp.get("data", []) if m.get("type") == "answer"])
 
-        ai_results = []
+      ai_results = []
         match = re.search(r'\[.*\]', content, re.DOTALL)
         if match:
             try:
-                for item in json.loads(match.group(0)):
-                    target_list = item.get('targets', []) or ([item.get('target')] if item.get('target') else [])
+                raw_json = json.loads(match.group(0))
+                for item in raw_json:
+                    # ⚠️ 修改点 2：适配你的新版 JSON 字段名
+                    # 确保无论智能体返回的是 target 还是 targets，都能抓到
+                    raw_target = item.get('target', [])
+                    if isinstance(raw_target, str):
+                        target_list = [raw_target]
+                    else:
+                        target_list = raw_target
+                    
                     ai_results.append({
                         "title": item.get('title', '最新科研文献'),
                         "targets": [str(t).upper().strip() for t in target_list if t],
                         "pub_date": str(item.get('pub_date', '2024-2026')),
                         "mechanism": item.get('mechanism', '解析中...'),
+                        "pmid": item.get('pmid', ''), # 传回 PMID 供前端使用
                         "url": f"https://pubmed.ncbi.nlm.nih.gov/{item.get('pmid', '')}/" if item.get('pmid') else "#"
                     })
-            except: pass
+            except Exception as e:
+                print(f"解析错误: {e}")
+        
         return jsonify({"code": 200, "data": ai_results})
-    except Exception as e:
-        return jsonify({"code": 500, "message": str(e)}), 500
+
 
 # 4. 靶点打分接口
 @app.route('/api/score-target', methods=['POST'])
