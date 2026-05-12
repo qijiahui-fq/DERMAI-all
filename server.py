@@ -192,11 +192,25 @@ def target_literature():
     })
 
 if __name__ == "__main__":
-    # 逻辑：优先读取系统分配的端口（HF会自动给7860），如果没有设置（比如本地），则默认使用 3000
-    port = int(os.environ.get("PORT", 3000)) 
+    # 检查是否在云端运行（通常云端环境会有特定的环境变量，或者我们直接判断）
+    # 如果检测到是在 Docker 或 HF 环境中，强制 7860
+    # 如果是在你自己的 localhost，则用 3000
     
+    env_port = os.environ.get("PORT")
+    
+    if env_port:
+        port = int(env_port)
+    else:
+        # 💡 这里是关键：根据你的 hostname 自动切换
+        import socket
+        hostname = socket.gethostname()
+        # 如果是本地电脑通常不是这种长字符串 ID，HF 的容器 ID 通常是随机长字符串
+        if "spaces" in hostname or len(hostname) > 15: 
+            port = 7860 
+        else:
+            port = 3000
+
     print(f"🚀 DermAI 后端引擎启动中...")
-    print(f"📍 监听地址: http://0.0.0.0:{port}")
+    print(f"📍 最终监听端口设定为: {port}")
     
-    # host 必须为 "0.0.0.0"，这是云端部署的硬性要求
     app.run(host="0.0.0.0", port=port, debug=False)
