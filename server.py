@@ -192,6 +192,11 @@ def target_literature():
     })
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 3000))
-    print(f"🚀 DermAI 后端引擎在端口 {port} 待命...")
+    # 逻辑：优先读取系统分配的端口（HF会自动给7860），如果没有设置（比如本地），则默认使用 3000
+    port = int(os.environ.get("PORT", 3000)) 
+    
+    print(f"🚀 DermAI 后端引擎启动中...")
+    print(f"📍 监听地址: http://0.0.0.0:{port}")
+    
+    # host 必须为 "0.0.0.0"，这是云端部署的硬性要求
     app.run(host="0.0.0.0", port=port, debug=False)
