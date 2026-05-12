@@ -192,25 +192,22 @@ def target_literature():
     })
 
 if __name__ == "__main__":
-    # 检查是否在云端运行（通常云端环境会有特定的环境变量，或者我们直接判断）
-    # 如果检测到是在 Docker 或 HF 环境中，强制 7860
-    # 如果是在你自己的 localhost，则用 3000
+    # 逻辑：
+    # 1. 优先读系统 PORT 变量
+    # 2. 如果没变量，判断是否在 HF 容器里（HF 容器通常会有这个环境变量）
+    # 3. 都没有，再判断是否是本地 localhost 环境
     
-    env_port = os.environ.get("PORT")
+    port = int(os.environ.get("PORT", 0))
     
-    if env_port:
-        port = int(env_port)
-    else:
-        # 💡 这里是关键：根据你的 hostname 自动切换
-        import socket
-        hostname = socket.gethostname()
-        # 如果是本地电脑通常不是这种长字符串 ID，HF 的容器 ID 通常是随机长字符串
-        if "spaces" in hostname or len(hostname) > 15: 
-            port = 7860 
+    if port == 0:
+        # 如果是本地运行，通常没有 SPACE_ID 这个环境变量
+        if os.environ.get("SPACE_ID"):
+            port = 7860  # 在 Hugging Face 环境下强制 7860
         else:
-            port = 3000
-
+            port = 3000  # 在你本地电脑运行默认 3000
+            
     print(f"🚀 DermAI 后端引擎启动中...")
-    print(f"📍 最终监听端口设定为: {port}")
+    print(f"📍 监听地址: http://0.0.0.0:{port}")
     
+    # debug=False 必须关闭，否则在某些云环境会触发双重启动导致端口占用
     app.run(host="0.0.0.0", port=port, debug=False)
