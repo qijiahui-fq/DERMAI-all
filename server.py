@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import requests
 import json
@@ -6,10 +6,11 @@ import os
 import time
 import re
 
-# 强制禁用代理，确保本地通信不受干扰
+# 强制禁用代理
 os.environ['NO_PROXY'] = 'localhost,127.0.0.1'
 
-app = Flask(__name__)
+# 🚀 核心修复：指定静态文件夹为 'dist'，并设置静态 URL 路径为根目录
+app = Flask(__name__, static_folder='dist', static_url_path='/')
 
 # 开启跨域支持
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -17,14 +18,29 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 # ================= 配置区 =================
 OPENTARGETS_GRAPHQL_URL = "https://api.platform.opentargets.org/api/v4/graphql"
 COZE_API_URL_CHAT = "https://api.coze.cn/v3/chat"
-
-# ⚠️ 提示：请确保这里的 TOKEN 是最新的 Personal Access Token
 COZE_TOKEN = "sat_8nOBUArKoa4TBX2NmUKyQHkFF3iOOdXtVdQnqyW3HTKUXBKIqCH693IIMrtAbX4y" 
 COZE_BOT_ID = "7627011465744318479"
 # ==========================================
 
 # ----------------------------------------------------------------
-# 1. OpenTargets 代理接口 (保留原有样式逻辑)
+# 0. 静态资源托管 (解决 404 的关键)
+# ----------------------------------------------------------------
+@app.route('/')
+def index():
+    # 访问根路径时，返回 dist 文件夹下的 index.html
+    return send_from_directory(app.static_folder, 'index.html')
+
+@app.route('/<path:path>')
+def serve_static(path):
+    # 逻辑：如果请求的文件在 dist 目录中存在（如 index-xxx.js, logo.png, DermAI_Manual.pdf）
+    if os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    # 如果找不到文件（通常是前端 Hash 路由），则返回 index.html 让 React 接管
+    return send_from_directory(app.static_folder, 'index.html')
+
+
+# ----------------------------------------------------------------
+# 1. OpenTargets 代理接口
 # ----------------------------------------------------------------
 @app.route('/api/opentargets/graphql', methods=['POST', 'OPTIONS'], strict_slashes=False)
 def opentargets_proxy():
@@ -52,7 +68,6 @@ def get_academic_insights():
     try:
         data = request.get_json()
         disease_name = data.get('disease', '银屑病')
-
         clean_token = str(COZE_TOKEN).strip()
 
         headers = {
@@ -60,8 +75,6 @@ def get_academic_insights():
             "Content-Type": "application/json; charset=utf-8"
         }
 
-        # 🚀 极致强化指令：分年检索、靶点强制提取、机制强制总结
-        # 即使插件没返回摘要，也要求 LLM 根据标题推导机制，严禁留空。
         instructions = (
             f"请严格分三次检索【{disease_name}】的文献：\n"
             f"1. 检索 2026 年文献提取约 10 篇；\n"
@@ -88,55 +101,35 @@ def get_academic_insights():
             ]
         }
 
-        print(f"\n🚀 [科研雷达] 任务启动：正在截击【{disease_name}】2024-至今的情报...")
-
-        # 核心：使用字节流发送，规避编码报错
         binary_payload = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-
-        # --- A. 创建 Chat ---
-        create_resp = requests.post(
-            COZE_API_URL_CHAT, 
-            headers=headers, 
-            data=binary_payload,
-            timeout=30
-        )
-        
+        create_resp = requests.post(COZE_API_URL_CHAT, headers=headers, data=binary_payload, timeout=30)
         create_data = create_resp.json()
+        
         if create_data.get("code") != 0:
-            print(f"❌ Coze 返回错误: {create_data.get('msg')}")
-            return jsonify({"code": 500, "message": "Coze 服务异常", "detail": create_data.get('msg')})
+            return jsonify({"code": 500, "message": "Coze 服务异常"})
 
         chat_id = create_data["data"]["id"]
         conversation_id = create_data["data"]["conversation_id"]
 
-        # --- B. 轮询状态 ---
         is_completed = False
         for i in range(80): 
             time.sleep(2)
             poll_resp = requests.get(
                 f"https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}",
-                headers=headers, 
-                timeout=20
+                headers=headers, timeout=20
             )
-            poll_data = poll_resp.json()
-            status = poll_data.get("data", {}).get("status")
-
+            status = poll_resp.json().get("data", {}).get("status")
             if status == "completed":
                 is_completed = True
                 break
-            elif status in ["failed", "canceled"]:
-                print(f"❌ 任务中断: {status}")
-                break
-            if i % 5 == 0: print(f"⏳ 正在扫描 2024-2026 全年份文献库...")
+            if status in ["failed", "canceled"]: break
 
         if not is_completed:
             return jsonify({"code": 200, "data": [], "message": "执行超时"})
 
-        # --- C. 提取结果 ---
         msg_resp = requests.get(
             f"https://api.coze.cn/v3/chat/message/list?chat_id={chat_id}&conversation_id={conversation_id}",
-            headers=headers, 
-            timeout=20
+            headers=headers, timeout=20
         )
         messages = msg_resp.json().get("data", [])
         content = "".join([m.get("content", "") for m in messages if m.get("type") == "answer"])
@@ -152,30 +145,24 @@ def get_academic_insights():
                     pmid = re.sub(r'\D', '', str(item.get('pmid', '')))
                     if not pmid or pmid in seen_pmids: continue
                     seen_pmids.add(pmid)
-
-                    # 🚀 防御性解析：确保 mechanism 和 targets 即使 AI 报错也能被接住
                     ai_results.append({
                         "title": item.get('title', '未知文献'),
                         "pub_date": item.get('pub_date', '2024'),
                         "pmid": pmid,
-                        # 兜底字段，防止前端显示“暂无解析”
                         "mechanism": item.get('mechanism') or item.get('Mechanism') or "正在调取底层分子机理...", 
                         "targets": item.get('targets') or item.get('Targets') or [], 
                         "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
                     })
-            except Exception as e:
-                print(f"❌ 解析异常: {e}")
+            except: pass
 
-        print(f"✅ 捕获成功: 成功截获 {len(ai_results)} 条情报")
         return jsonify({"code": 200, "data": ai_results})
 
     except Exception as e:
-        print(f"❌ 系统崩溃: {str(e)}")
-        return jsonify({"code": 500, "message": f"后端引擎错误: {str(e)}"}), 500
+        return jsonify({"code": 500, "message": str(e)}), 500
 
 
 # ----------------------------------------------------------------
-# 3. 靶点评分接口 (保持原样)
+# 3. 靶点评分接口
 # ----------------------------------------------------------------
 @app.route('/api/score-target', methods=['POST'])
 def score_target():
@@ -186,28 +173,17 @@ def score_target():
 @app.route('/api/target-literature', methods=['GET'])
 def target_literature():
     target = request.args.get('target', '')
-    return jsonify({
-        'code': 200, 
-        'data': [{'title': f'{target} 关联研究证据', 'source': 'PubMed'}]
-    })
+    return jsonify({'code': 200, 'data': [{'title': f'{target} 关联研究证据', 'source': 'PubMed'}]})
+
 
 if __name__ == "__main__":
-    # 逻辑：
-    # 1. 优先读系统 PORT 变量
-    # 2. 如果没变量，判断是否在 HF 容器里（HF 容器通常会有这个环境变量）
-    # 3. 都没有，再判断是否是本地 localhost 环境
-    
+    # 自动识别环境并切换端口
     port = int(os.environ.get("PORT", 0))
-    
     if port == 0:
-        # 如果是本地运行，通常没有 SPACE_ID 这个环境变量
         if os.environ.get("SPACE_ID"):
-            port = 7860  # 在 Hugging Face 环境下强制 7860
+            port = 7860  # Hugging Face 环境
         else:
-            port = 3000  # 在你本地电脑运行默认 3000
+            port = 3000  # 本地环境
             
-    print(f"🚀 DermAI 后端引擎启动中...")
-    print(f"📍 监听地址: http://0.0.0.0:{port}")
-    
-    # debug=False 必须关闭，否则在某些云环境会触发双重启动导致端口占用
+    print(f"🚀 DermAI 后端引擎启动成功 | 监听端口: {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
